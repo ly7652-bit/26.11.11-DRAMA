@@ -1,11 +1,11 @@
 // ==============================================================================
 // 파일명: api/recommend.js
-// 설명: OpenAI API를 활용한 드라마 취향 분석 및 추천 Serverless Function (고도화 버전)
+// 설명: OpenAI API를 활용한 드라마 취향 분석 및 추천 Serverless Function
 // 개선 사항:
-//   1. 사용자가 요청한 장르와 실제 작품의 공인 장르 일치도 강력 강화
-//   2. 추천 이유를 핵심만 2줄 내외로 요약
-//   3. 실제 드라마 줄거리 (3~5줄 요약) 추가
-//   4. 주요 등장인물 및 배역 설명 (characters) 추가
+//   1. [★ 장르 날조/조작 원천 금지 ★] 나무위키 및 방송사 공식 등록된 실제 장르만 100% 그대로 기재
+//   2. 사용자가 요구한 키워드에 맞추려고 없는 장르(예: 액션 없는 드라마에 액션 추가)를 억지로 끼워 넣는 행위 엄단
+//   3. 조건에 완벽히 맞는 작품이 부족하여 대체 추천할 경우, 장르는 사실대로 표기하고 사유에서 정직하게 안내
+//   4. temperature 0.1로 사실성 극대화 및 지어내기 완전 차단
 // ==============================================================================
 
 import OpenAI from 'openai';
@@ -75,52 +75,53 @@ export default async function handler(req, res) {
   // 4. OpenAI 클라이언트 인스턴스 생성
   const openai = new OpenAI({
     apiKey: apiKey,
-    timeout: 35000 // 35초 타임아웃
+    timeout: 35000
   });
 
   const currentYear = new Date().getFullYear();
 
-  // 5. 대폭 고도화된 AI 시스템 프롬프트 구성
-  const systemPrompt = `당신은 사용자의 취향을 정밀하게 분석하여 최고의 드라마를 추천하는 대한민국 최고의 드라마 큐레이터 전문가입니다.
+  // 5. 정직한 팩트 기반 시스템 프롬프트 구성
+  const systemPrompt = `당신은 대한민국 방송사, OTT 및 나무위키의 공식 메타데이터를 100% 팩트 기반으로 인출하는 정직한 드라마 데이터베이스 전문가입니다.
 
-[★ 최우선 필수 규칙: 장르 일치도 철저 보장 ★]
-1. 사용자가 원하는 장르(예: 범죄, 스릴러, 로맨스, SF, 사극, 코미디, 판타지 등)와 분위기를 정확히 파악하세요.
-2. 실제로 공식 방영 및 등록된 공식 장르 분류에 사용자가 원하는 핵심 장르가 **반드시 포함되어 있는 실존 드라마만** 추천하세요.
-3. 사용자가 요청하지 않은 엉뚱한 장르나 다른 분위기의 드라마를 절대 추천하지 마세요. (예: 범죄 스릴러를 요청했는데 단순 멜로 드라마를 추천하는 등의 오류 엄금)
-4. 반드시 실제로 방영된 실존 드라마만 추천하며, 존재하지 않는 가상의 작품명을 절대 지어내지 마세요.
+[★ 절대 준수 1: 장르 날조/조작 절대 금지 (100% 공식 사실만 기재) ★]
+- genres 배열에는 나무위키 및 방송사 공식 정보에 실제로 등재되어 있는 **'진짜 공식 장르'만 그대로** 적으세요.
+- 사용자가 "액션 로맨스 코미디"를 요청했다고 해서, **실제로는 액션 드라마가 아닌 작품(예: 순수 로코물 등)에 억지로 '액션' 장르를 거짓으로 집어넣는 행위를 절대 엄격히 금지합니다!**
+- 다 충족하는 드라마가 부족하여 로맨틱 코미디 드라마를 추천한다면, 장르에는 실제 장르인 ["로맨틱 코미디"]만 정직하게 적으세요.
+- 거짓 장르 태그를 절대 달지 마세요.
 
-[상세 출력 정보 규칙]
-- recommendations: 최대 3개 (1위~3위). 조건에 맞는 훌륭한 작품만 추천하며 억지로 채우지 마세요.
-- matchPercentage(0~100 정수): 후보 드라마 사이의 상대적인 취향 적합도(매칭 점수)입니다.
-- reason(추천 이유): **정확히 2줄 내외**로 핵심만 간결하고 명확하게 작성하세요. 사용자의 취향 요구사항과 작품의 일치 포인트를 요약합니다.
-- synopsis(줄거리 요약): **반드시 3줄에서 5줄 사이**로, 결말 스포일러 없이 작품의 도입부 갈등과 핵심 사건 전개를 흥미진진하게 요약하세요.
-- characters(주요 등장인물): 드라마의 중심이 되는 핵심 배역 2~3명을 배열로 제공하세요. 형식: "배역명 (배우명) - 인물의 핵심 특징 및 역할 설명"
-- genres: 실제 공식 장르 최대 4개 한국어 단어 배열.
+[★ 절대 준수 2: 정직한 3개 순위 추천 및 이유 설명 ★]
+- 사용자가 복합 조건을 요구했을 때:
+  1) 모든 조건을 충족하는 실제 드라마가 있다면 최우선 1위로 추천하세요. (예: 액션+로맨스+코미디 -> '힘쎈여자 도봉순' 등)
+  2) 모든 조건을 만족하는 실존 명작이 부족하다면, 거짓말하지 말고 요구조건 중 일부(예: 로맨스+코미디)를 확실하게 만족하는 실존 작품들을 차순위(2위, 3위)로 채워 **총 3개**를 추천하세요.
+  3) 추천 이유(reason, 2줄 내외)에서도 솔직하게 서술하세요. (예: "액션 요소는 없지만, 요청하신 로맨스와 코미디 요소를 최고 수준으로 만끽할 수 있는 대표작입니다.")
+
+[★ 절대 준수 3: 실제 공식 줄거리와 실존 배역 팩트만 기재 ★]
+- synopsis(줄거리): 네이버 드라마 및 방송사 공식 홈페이지에 등록된 '실제 공식 기획의도 및 대표 줄거리'를 3~5줄로 정확하게 요약하세요. 절대로 없는 이야기를 지어내지 마세요.
+- characters(등장인물): 해당 작품에 실제로 출연한 주요 배역명과 배우명을 정확히 기재하세요. (예: "안민혁 (박형식 분) - 게임회사 아인소프트의 대표")
 
 반드시 아래의 순수 JSON 형식으로만 응답하세요:
 {
   "recommendations": [
     {
-      "title": "드라마 공식 명칭",
-      "year": 2021,
-      "genres": ["범죄", "스릴러", "미스터리"],
-      "matchPercentage": 96,
-      "reason": "요청하신 치밀한 두뇌 싸움과 충격적인 반전 요소를 모두 갖춘 웰메이드 스릴러입니다.\\n답답함 없는 빠른 전개와 긴장감 넘치는 연출이 취향에 완벽히 부합합니다.",
-      "synopsis": "바른 청년으로 살아가던 순경 정바름이 사이코패스 연쇄살인마와 마주치며 시작되는 이야기입니다.\\n희대의 프레데터 살인범을 쫓는 과정에서 감춰졌던 잔혹한 진실들이 하나둘씩 드러납니다.\\n인간의 뇌와 사이코패스 유전자를 둘러싼 충격적인 사건들이 예측 불가능하게 휘몰아칩니다.",
+      "title": "드라마 공식 제목",
+      "year": 2017,
+      "genres": ["실제", "공식", "장르만"],
+      "matchPercentage": 92,
+      "reason": "솔직하고 명확한 2줄 내외 추천 이유",
+      "synopsis": "실제 포털에 나오는 공식 줄거리 3~5줄 요약",
       "characters": [
-        "정바름 (이승기 분) - 정의감 넘치는 파출소 순경이었으나 일련의 사건 후 변화를 겪는 인물",
-        "고무치 (이희준 분) - 부모를 죽인 살인마에게 복수하기 위해 형사가 된 강력계 형사"
+        "실제배역 (실제배우) - 인물 설명"
       ]
     }
   ]
 }`;
 
   try {
-    // 6. OpenAI API 호출
+    // 6. OpenAI API 호출 (temperature: 0.1 극단적 팩트 모드)
     const completion = await openai.chat.completions.create({
       model: modelName,
-      temperature: 0.6,
-      max_tokens: 2000,
+      temperature: 0.1, // 창작/지어내기/장르조작 완전 차단 (팩트 고정)
+      max_tokens: 2200,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -160,7 +161,6 @@ export default async function handler(req, res) {
     for (const item of rawList) {
       if (!item || typeof item !== 'object') continue;
 
-      // 제목 검증
       const title = typeof item.title === 'string' ? item.title.trim() : '';
       if (!title || title.length < 1 || title.length > 120) continue;
 
@@ -168,13 +168,11 @@ export default async function handler(req, res) {
       if (seenTitles.has(normalizedTitleKey)) continue;
       seenTitles.add(normalizedTitleKey);
 
-      // 연도 검증
       let year = null;
       if (Number.isInteger(item.year) && item.year >= 1900 && item.year <= currentYear + 2) {
         year = item.year;
       }
 
-      // 장르 검증
       let genres = [];
       if (Array.isArray(item.genres)) {
         genres = item.genres
@@ -183,20 +181,16 @@ export default async function handler(req, res) {
           .slice(0, 5);
       }
 
-      // 점수 검증 (0~100)
       let matchPercentage = 0;
       if (typeof item.matchPercentage === 'number' && !isNaN(item.matchPercentage)) {
         matchPercentage = Math.round(Math.max(0, Math.min(100, item.matchPercentage)));
       }
 
-      // 2줄 추천 사유 검증
       const reason = typeof item.reason === 'string' ? item.reason.trim() : '';
       if (!reason || reason.length < 10) continue;
 
-      // 줄거리 (3~5줄 요약) 검증
       const synopsis = typeof item.synopsis === 'string' ? item.synopsis.trim() : '';
 
-      // 주요 등장인물 검증
       let characters = [];
       if (Array.isArray(item.characters)) {
         characters = item.characters
