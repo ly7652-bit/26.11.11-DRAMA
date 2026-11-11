@@ -1,0 +1,24 @@
+{
+  "name": "drama-recommendation-service",
+  "version": "1.0.0",
+  "description": "사용자 취향 기반 드라마 추천 및 익명 피드백 웹 서비스",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "vercel:dev": "vercel dev"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.86.1"
+  },
+  "devDependencies": {
+    "vercel": "^41.3.1"
+  }
+}
