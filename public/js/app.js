@@ -1,14 +1,14 @@
 // ==============================================================================
 // 파일명: public/js/app.js
-// 설명: 드라마 추천 서비스의 메인 프론트엔드 제어 컨트롤러
+// 설명: 드라마 추천 서비스의 메인 프론트엔드 제어 컨트롤러 (고도화 버전)
 // 담당 역할:
-//   1. 이벤트 리스너 바인딩 (추천 폼 제출, 피드백 폼 제출, 더보기 등)
-//   2. 입력 글자 수 실시간 카운팅
-//   3. 로딩, 빈 결과, 에러 상태 관리 및 화면 렌더링 조율
+//   1. 취향 추천 폼 및 피드백 폼 이벤트 처리
+//   2. 추천 결과 렌더링 및 누적 [좋아요/싫어요] 실시간 조회 & 집계 반영
+//   3. 중복 클릭 방지 및 상태 관리 (로딩/오류/빈 결과)
 // ==============================================================================
 
 import { validatePreference, validateFeedback } from './validation.js';
-import { requestRecommendations, fetchFeedbackList, submitFeedback } from './api.js';
+import { requestRecommendations, fetchFeedbackList, submitFeedback, fetchReactions, sendReaction } from './api.js';
 import { createRecommendationCard, createFeedbackCard } from './render.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -44,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const feedbackStatus = document.getElementById('feedback-status');
   const loadMoreBtn = document.getElementById('load-more-feedback-btn');
 
-  // 피드백 페이징 상태 변수
   let feedbackOffset = 0;
   const FEEDBACK_LIMIT = 20;
 
@@ -52,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. 글자 수 카운터 및 키보드 입력 핸들러
   // ----------------------------------------------------------------------------
 
-  // 취향 입력창 글자 수 카운팅
   preferenceInput.addEventListener('input', () => {
     const currentLength = preferenceInput.value.length;
     charCounter.textContent = `${currentLength} / 500`;
@@ -61,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 줄바꿈이 아닌 Ctrl+Enter / Cmd+Enter 키로 빠른 제출 지원
   preferenceInput.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
@@ -69,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 피드백 내용 글자 수 카운팅
   feedbackContent.addEventListener('input', () => {
     const currentLength = feedbackContent.value.length;
     feedbackCharCounter.textContent = `${currentLength} / 1000`;
@@ -85,9 +81,34 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ----------------------------------------------------------------------------
-  // 3. 드라마 취향 추천 제출 처리
+  // 3. 좋아요 / 싫어요 반응 클릭 핸들러
   // ----------------------------------------------------------------------------
+  async function handleReaction(title, action, likeBtn, dislikeBtn, likeCountSpan, dislikeCountSpan) {
+    // 중복 클릭 방지 (버튼 일시 비활성화)
+    likeBtn.disabled = true;
+    dislikeBtn.disabled = true;
 
+    try {
+      const result = await sendReaction(title, action);
+      likeCountSpan.textContent = String(result.likes || 0);
+      dislikeCountSpan.textContent = String(result.dislikes || 0);
+
+      // 선택된 버튼에 활성 클래스 부여
+      if (action === 'like') {
+        likeBtn.classList.add('active');
+      } else {
+        dislikeBtn.classList.add('active');
+      }
+    } catch {
+      alert('반응을 기록하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      likeBtn.disabled = false;
+      dislikeBtn.disabled = false;
+    }
+  }
+
+  // ----------------------------------------------------------------------------
+  // 4. 드라마 취향 추천 제출 처리
+  // ----------------------------------------------------------------------------
   recommendForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -104,26 +125,39 @@ document.addEventListener('DOMContentLoaded', () => {
     setRecommendLoading(true);
 
     try {
-      // 추천 섹션 열기 및 초기화
       resultsSection.style.display = 'block';
-      resultsList.replaceChildren(); // 기존 카드 초기화
+      resultsList.replaceChildren();
       resultsStatus.style.display = 'none';
       resultsStatus.className = 'status-box';
 
-      // 스크롤을 결과 섹션으로 부드럽게 이동
       resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-      // API 호출
+      // API 호출 (고도화된 추천)
       const data = await requestRecommendations(rawPreference);
       const recommendations = data?.recommendations || [];
 
       if (recommendations.length === 0) {
-        showResultsStatus('입력하신 조건에 맞는 드라마를 찾지 못했습니다. 다른 키워드나 분위기로 다시 시도해 보세요.', false);
+        showResultsStatus('입력하신 조건에 부합하는 드라마를 찾지 못했습니다. 다른 키워드나 분위기로 다시 시도해 보세요.', false);
       } else {
-        // 결과 카드 추가
+        // 결과 카드 DOM 생성
         recommendations.forEach(item => {
-          const card = createRecommendationCard(item);
+          const card = createRecommendationCard(item, handleReaction);
           resultsList.appendChild(card);
+        });
+
+        // 추천된 드라마들의 누적 좋아요/싫어요 수 비동기 조회
+        const titles = recommendations.map(r => r.title);
+        fetchReactions(titles).then(resData => {
+          const reactionMap = resData?.reactions || {};
+          recommendations.forEach(item => {
+            const card = resultsList.querySelector(`article[data-title="${CSS.escape(item.title)}"]`);
+            if (card && reactionMap[item.title]) {
+              const likeCountSpan = card.querySelector('.like-count');
+              const dislikeCountSpan = card.querySelector('.dislike-count');
+              if (likeCountSpan) likeCountSpan.textContent = String(reactionMap[item.title].likes || 0);
+              if (dislikeCountSpan) dislikeCountSpan.textContent = String(reactionMap[item.title].dislikes || 0);
+            }
+          });
         });
       }
 
@@ -157,10 +191,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ----------------------------------------------------------------------------
-  // 4. 익명 피드백 등록 및 목록 조회 처리
+  // 5. 익명 피드백 등록 및 목록 조회 처리
   // ----------------------------------------------------------------------------
-
-  // 피드백 폼 제출 핸들러
   feedbackForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -180,11 +212,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const savedItem = await submitFeedback(name, content);
 
-      // 입력 폼 초기화
       feedbackForm.reset();
       feedbackCharCounter.textContent = '0 / 1000';
 
-      // 목록 최상단에 즉시 새 카드 추가
       const newCard = createFeedbackCard(savedItem);
       if (feedbackList.firstChild) {
         feedbackList.insertBefore(newCard, feedbackList.firstChild);
@@ -192,9 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
         feedbackList.appendChild(newCard);
       }
 
-      // '피드백 없음' 안내 박스가 켜져 있었다면 숨김
       feedbackStatus.style.display = 'none';
-
       alert('피드백이 성공적으로 등록되었습니다. 감사합니다!');
 
     } catch (err) {
@@ -217,7 +245,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 피드백 목록 로드 함수
   async function loadFeedbacks(isInitial = false) {
     if (isInitial) {
       feedbackOffset = 0;
@@ -248,7 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       feedbackOffset += items.length;
 
-      // 더 보기 버튼 표시 여부
       if (hasMore) {
         loadMoreBtn.style.display = 'inline-block';
       } else {
@@ -266,12 +292,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 더 보기 버튼 클릭 핸들러
   loadMoreBtn.addEventListener('click', () => {
     loadFeedbacks(false);
   });
 
-  // 초기 피드백 목록 로드 시작
   loadFeedbacks(true);
 });
-

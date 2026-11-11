@@ -5,6 +5,7 @@
 //   1. 드라마 추천 요청 (POST /api/recommend)
 //   2. 피드백 목록 페이징 조회 (GET /api/feedback)
 //   3. 피드백 작성 제출 (POST /api/feedback)
+//   4. 드라마 누적 좋아요/싫어요 조회 (GET /api/reactions) 및 등록 (POST /api/reactions)
 // ==============================================================================
 
 /**
@@ -101,3 +102,46 @@ export async function submitFeedback(name, content) {
   }
 }
 
+/**
+ * 드라마들의 누적 좋아요/싫어요 반응 수를 조회합니다.
+ * @param {string[]} titles 
+ * @returns {Promise<{ reactions: Object }>}
+ */
+export async function fetchReactions(titles) {
+  if (!titles || titles.length === 0) return { reactions: {} };
+  try {
+    const query = encodeURIComponent(titles.join(','));
+    const response = await fetch(`/api/reactions?titles=${query}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    const data = await response.json().catch(() => null);
+    return data || { reactions: {} };
+  } catch {
+    return { reactions: {} };
+  }
+}
+
+/**
+ * 특정 드라마에 좋아요 또는 싫어요를 전송합니다.
+ * @param {string} title 
+ * @param {'like' | 'dislike'} action 
+ * @returns {Promise<{ title: string, likes: number, dislikes: number }>}
+ */
+export async function sendReaction(title, action) {
+  try {
+    const response = await fetch('/api/reactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, action })
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.error?.message || '반응 처리에 실패했습니다.');
+    }
+    return data;
+  } catch (error) {
+    throw error;
+  }
+}

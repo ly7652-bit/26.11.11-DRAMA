@@ -1,16 +1,14 @@
 // ==============================================================================
 // 파일명: api/recommend.js
-// 설명: OpenAI API를 활용한 드라마 취향 분석 및 추천 Serverless Function
-// 담당 역할: 
-//   1. 클라이언트 요청 유효성 검사 (5~500자)
-//   2. OpenAI API 연동 및 JSON 응답 파싱
-//   3. AI 응답 스키마/점수 범위 검증 및 중복 작품 제거
-//   4. 순위 정렬(최대 3개) 후 안전한 JSON 반환
+// 설명: OpenAI API를 활용한 드라마 취향 분석 및 추천 Serverless Function (고도화 버전)
+// 개선 사항:
+//   1. 사용자가 요청한 장르와 실제 작품의 공인 장르 일치도 강력 강화
+//   2. 추천 이유를 핵심만 2줄 내외로 요약
+//   3. 실제 드라마 줄거리 (3~5줄 요약) 추가
+//   4. 주요 등장인물 및 배역 설명 (characters) 추가
 // ==============================================================================
 
 import OpenAI from 'openai';
-
-// 환경 변수 설정 (로컬 환경을 위한 dotenv 처리 포함)
 import 'dotenv/config';
 
 export default async function handler(req, res) {
@@ -25,7 +23,7 @@ export default async function handler(req, res) {
     });
   }
 
-  // 2. 환경 변수 확인 (OpenAI API 키 누락 시 안전한 500 에러 처리)
+  // 2. 환경 변수 확인
   const apiKey = process.env.OPENAI_API_KEY;
   const modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -55,7 +53,6 @@ export default async function handler(req, res) {
 
   const preference = body?.preference;
 
-  // 입력값 검증: 문자열 타입 여부 확인 및 공백 제거 후 5~500자 제한
   if (typeof preference !== 'string') {
     return res.status(400).json({
       error: {
@@ -78,34 +75,42 @@ export default async function handler(req, res) {
   // 4. OpenAI 클라이언트 인스턴스 생성
   const openai = new OpenAI({
     apiKey: apiKey,
-    timeout: 30000 // 30초 타임아웃 설정
+    timeout: 35000 // 35초 타임아웃
   });
 
-  // 현재 연도 계산 (유효한 방영 연도 검증용)
   const currentYear = new Date().getFullYear();
 
-  // 5. AI 시스템 프롬프트 구성 (AGENTS.md 및 PRD.md 지침 준수)
-  const systemPrompt = `당신은 사용자의 취향을 정밀하게 분석하여 최고의 드라마를 추천하는 드라마 큐레이터 전문가입니다.
-사용자의 입력을 장르, 분위기, 소재, 전개 속도, 감정 톤 관점에서 분석하고, 가장 잘 부합하는 실제 존재하는 드라마를 최대 3개 추천하세요.
+  // 5. 대폭 고도화된 AI 시스템 프롬프트 구성
+  const systemPrompt = `당신은 사용자의 취향을 정밀하게 분석하여 최고의 드라마를 추천하는 대한민국 최고의 드라마 큐레이터 전문가입니다.
 
-[엄격한 추천 및 출력 규칙]
-1. 반드시 실제로 제작 및 방영된 실존 드라마만 추천하세요. 허구의 작품명을 절대 지어내지 마세요.
-2. 작품명이나 연도를 확신할 수 없으면 추천에서 제외하거나 연도를 null로 설정하세요.
-3. 추천 순위는 최대 3개(1위~3위)입니다. 어울리는 드라마가 적다면 1~2개만 반환해도 되며 억지로 채우지 마세요.
-4. matchPercentage(0~100 정수): 객관적인 시청 성공률이나 확률이 아니라, 후보 드라마 사이의 '상대적인 취향 적합도(매칭 점수)'입니다. 가장 잘 맞는 1위 작품을 기준으로 적절한 점수를 부여하세요.
-5. reason(추천 이유): 20자 이상 500자 이하의 친절하고 명확한 한국어로 작성하세요. 사용자가 입력한 취향 키워드/분위기와 작품의 핵심 특징을 연결하여 구체적으로 설득력 있게 설명하세요.
-6. genres: 장르를 최대 5개까지 한국어 단어 배열로 제공하세요.
-7. 반드시 아래의 순수 JSON 형식으로만 응답하고, 마크다운 코드블록(\`\`\`json 등)이나 기타 텍스트를 절대 붙이지 마세요.
+[★ 최우선 필수 규칙: 장르 일치도 철저 보장 ★]
+1. 사용자가 원하는 장르(예: 범죄, 스릴러, 로맨스, SF, 사극, 코미디, 판타지 등)와 분위기를 정확히 파악하세요.
+2. 실제로 공식 방영 및 등록된 공식 장르 분류에 사용자가 원하는 핵심 장르가 **반드시 포함되어 있는 실존 드라마만** 추천하세요.
+3. 사용자가 요청하지 않은 엉뚱한 장르나 다른 분위기의 드라마를 절대 추천하지 마세요. (예: 범죄 스릴러를 요청했는데 단순 멜로 드라마를 추천하는 등의 오류 엄금)
+4. 반드시 실제로 방영된 실존 드라마만 추천하며, 존재하지 않는 가상의 작품명을 절대 지어내지 마세요.
 
-JSON 응답 스키마:
+[상세 출력 정보 규칙]
+- recommendations: 최대 3개 (1위~3위). 조건에 맞는 훌륭한 작품만 추천하며 억지로 채우지 마세요.
+- matchPercentage(0~100 정수): 후보 드라마 사이의 상대적인 취향 적합도(매칭 점수)입니다.
+- reason(추천 이유): **정확히 2줄 내외**로 핵심만 간결하고 명확하게 작성하세요. 사용자의 취향 요구사항과 작품의 일치 포인트를 요약합니다.
+- synopsis(줄거리 요약): **반드시 3줄에서 5줄 사이**로, 결말 스포일러 없이 작품의 도입부 갈등과 핵심 사건 전개를 흥미진진하게 요약하세요.
+- characters(주요 등장인물): 드라마의 중심이 되는 핵심 배역 2~3명을 배열로 제공하세요. 형식: "배역명 (배우명) - 인물의 핵심 특징 및 역할 설명"
+- genres: 실제 공식 장르 최대 4개 한국어 단어 배열.
+
+반드시 아래의 순수 JSON 형식으로만 응답하세요:
 {
   "recommendations": [
     {
-      "title": "작품 제목 (한국어 공식 명칭 우선)",
-      "year": 2022,
-      "genres": ["범죄", "스릴러"],
-      "matchPercentage": 95,
-      "reason": "사용자님이 요청하신 어두운 분위기와 빠른 반전 요소를 모두 갖춘 작품으로..."
+      "title": "드라마 공식 명칭",
+      "year": 2021,
+      "genres": ["범죄", "스릴러", "미스터리"],
+      "matchPercentage": 96,
+      "reason": "요청하신 치밀한 두뇌 싸움과 충격적인 반전 요소를 모두 갖춘 웰메이드 스릴러입니다.\\n답답함 없는 빠른 전개와 긴장감 넘치는 연출이 취향에 완벽히 부합합니다.",
+      "synopsis": "바른 청년으로 살아가던 순경 정바름이 사이코패스 연쇄살인마와 마주치며 시작되는 이야기입니다.\\n희대의 프레데터 살인범을 쫓는 과정에서 감춰졌던 잔혹한 진실들이 하나둘씩 드러납니다.\\n인간의 뇌와 사이코패스 유전자를 둘러싼 충격적인 사건들이 예측 불가능하게 휘몰아칩니다.",
+      "characters": [
+        "정바름 (이승기 분) - 정의감 넘치는 파출소 순경이었으나 일련의 사건 후 변화를 겪는 인물",
+        "고무치 (이희준 분) - 부모를 죽인 살인마에게 복수하기 위해 형사가 된 강력계 형사"
+      ]
     }
   ]
 }`;
@@ -114,8 +119,8 @@ JSON 응답 스키마:
     // 6. OpenAI API 호출
     const completion = await openai.chat.completions.create({
       model: modelName,
-      temperature: 0.7,
-      max_tokens: 1500,
+      temperature: 0.6,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -155,22 +160,21 @@ JSON 응답 스키마:
     for (const item of rawList) {
       if (!item || typeof item !== 'object') continue;
 
-      // 제목 검증 (1~120자)
+      // 제목 검증
       const title = typeof item.title === 'string' ? item.title.trim() : '';
       if (!title || title.length < 1 || title.length > 120) continue;
 
-      // 중복 작품명 제거 (소문자 및 띄어쓰기 정규화 기준)
       const normalizedTitleKey = title.toLowerCase().replace(/\s+/g, '');
       if (seenTitles.has(normalizedTitleKey)) continue;
       seenTitles.add(normalizedTitleKey);
 
-      // 연도 검증 (1900년 ~ 현재연도+2년 이내의 정수 또는 null)
+      // 연도 검증
       let year = null;
       if (Number.isInteger(item.year) && item.year >= 1900 && item.year <= currentYear + 2) {
         year = item.year;
       }
 
-      // 장르 검증 (최대 5개, 각 1~30자)
+      // 장르 검증
       let genres = [];
       if (Array.isArray(item.genres)) {
         genres = item.genres
@@ -179,36 +183,51 @@ JSON 응답 스키마:
           .slice(0, 5);
       }
 
-      // 매칭 점수 검증 (0~100 정수)
+      // 점수 검증 (0~100)
       let matchPercentage = 0;
       if (typeof item.matchPercentage === 'number' && !isNaN(item.matchPercentage)) {
         matchPercentage = Math.round(Math.max(0, Math.min(100, item.matchPercentage)));
       }
 
-      // 추천 사유 검증 (20~500자)
+      // 2줄 추천 사유 검증
       const reason = typeof item.reason === 'string' ? item.reason.trim() : '';
-      if (reason.length < 20 || reason.length > 500) continue;
+      if (!reason || reason.length < 10) continue;
+
+      // 줄거리 (3~5줄 요약) 검증
+      const synopsis = typeof item.synopsis === 'string' ? item.synopsis.trim() : '';
+
+      // 주요 등장인물 검증
+      let characters = [];
+      if (Array.isArray(item.characters)) {
+        characters = item.characters
+          .filter(c => typeof c === 'string' && c.trim().length > 0)
+          .map(c => c.trim())
+          .slice(0, 4);
+      }
 
       validatedRecommendations.push({
         title,
         year,
         genres,
         matchPercentage,
-        reason
+        reason,
+        synopsis,
+        characters
       });
     }
 
-    // 9. 점수 기준 내림차순 정렬 (동점일 경우 AI가 반환한 원래 순서 유지)
+    // 9. 점수 기준 정렬 및 최대 3개 제한
     validatedRecommendations.sort((a, b) => b.matchPercentage - a.matchPercentage);
 
-    // 최대 3개로 제한하고 1~3위 순위(rank) 부여
     const finalResults = validatedRecommendations.slice(0, 3).map((item, index) => ({
       rank: index + 1,
       title: item.title,
       year: item.year,
       genres: item.genres,
       matchPercentage: item.matchPercentage,
-      reason: item.reason
+      reason: item.reason,
+      synopsis: item.synopsis,
+      characters: item.characters
     }));
 
     // 10. 최종 결과 응답
@@ -218,7 +237,6 @@ JSON 응답 스키마:
     });
 
   } catch (err) {
-    // 타임아웃 에러 처리
     if (err?.name === 'AbortError' || err?.code === 'ETIMEDOUT') {
       return res.status(504).json({
         error: {
@@ -228,7 +246,6 @@ JSON 응답 스키마:
       });
     }
 
-    // 요청 제한(Rate Limit) 초과 처리
     if (err?.status === 429) {
       return res.status(429).json({
         error: {
@@ -238,7 +255,6 @@ JSON 응답 스키마:
       });
     }
 
-    // 기타 OpenAI API 에러 처리 (민감한 시스템 키나 원문은 숨김)
     return res.status(502).json({
       error: {
         code: 'AI_PROVIDER_ERROR',
@@ -247,4 +263,3 @@ JSON 응답 스키마:
     });
   }
 }
-

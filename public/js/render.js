@@ -1,9 +1,11 @@
 // ==============================================================================
 // 파일명: public/js/render.js
-// 설명: 화면 DOM 요소를 안전하게 생성하고 렌더링하는 모듈
-// 보안 원칙:
-//   - XSS 방지를 위해 innerHTML 사용을 엄격히 배제하고 textContent 및 DOM 메서드만 사용
-//   - 점수 막대 및 상태 메시지에 웹 접근성(ARIA) 속성 준수
+// 설명: 화면 DOM 요소를 안전하게 생성하고 렌더링하는 모듈 (고도화 버전)
+// 개선 사항:
+//   1. 1위, 2위, 3위 순위별 클래스(rank-1, rank-2, rank-3) 부여
+//   2. 순위 배지 바로 옆에 [👍 좋아요] 및 [👎 싫어요] 누적 반응 버튼 배치
+//   3. 실제 드라마 줄거리(3~5줄) 및 주요 등장인물 카드 영역 추가
+//   4. XSS 방지를 위한 textContent 및 DOM 안전 생성 원칙 철저 준수
 // ==============================================================================
 
 /**
@@ -32,31 +34,87 @@ export function formatDate(isoString) {
 /**
  * 개별 추천 드라마 결과 카드를 안전한 DOM 요소로 생성합니다.
  * @param {Object} item 
+ * @param {Function} onReaction 
  * @returns {HTMLElement}
  */
-export function createRecommendationCard(item) {
+export function createRecommendationCard(item, onReaction) {
   const card = document.createElement('article');
-  card.className = 'result-card';
+  card.className = `result-card rank-${item.rank}`;
+  card.dataset.title = item.title;
 
-  // 1. 헤더 (순위 배지 + 제목)
+  // 1. 헤더 (순위 배지 + 좋아요/싫어요 버튼 + 작품 제목)
   const header = document.createElement('div');
   header.className = 'card-header';
 
-  const badgeWrapper = document.createElement('div');
-  const badge = document.createElement('span');
-  badge.className = 'rank-badge';
-  badge.textContent = `${item.rank}위`;
-  badgeWrapper.appendChild(badge);
+  // 왼쪽: 순위 배지 & 반응 버튼 그룹
+  const headerLeft = document.createElement('div');
+  headerLeft.className = 'header-left';
 
+  const badge = document.createElement('span');
+  badge.className = `rank-badge rank-badge-${item.rank}`;
+  badge.textContent = `${item.rank}위`;
+  headerLeft.appendChild(badge);
+
+  // 좋아요 / 싫어요 반응 버튼 그룹 (순위 옆에 배치)
+  const reactionsGroup = document.createElement('div');
+  reactionsGroup.className = 'reactions-group';
+
+  // 좋아요 버튼
+  const likeBtn = document.createElement('button');
+  likeBtn.type = 'button';
+  likeBtn.className = 'btn-reaction btn-like';
+  likeBtn.setAttribute('aria-label', `${item.title} 좋아요`);
+
+  const likeIcon = document.createElement('span');
+  likeIcon.textContent = '👍';
+  const likeCountSpan = document.createElement('span');
+  likeCountSpan.className = 'reaction-count like-count';
+  likeCountSpan.textContent = '0';
+
+  likeBtn.appendChild(likeIcon);
+  likeBtn.appendChild(likeCountSpan);
+
+  likeBtn.addEventListener('click', () => {
+    if (typeof onReaction === 'function') {
+      onReaction(item.title, 'like', likeBtn, dislikeBtn, likeCountSpan, dislikeCountSpan);
+    }
+  });
+
+  // 싫어요 버튼
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.type = 'button';
+  dislikeBtn.className = 'btn-reaction btn-dislike';
+  dislikeBtn.setAttribute('aria-label', `${item.title} 싫어요`);
+
+  const dislikeIcon = document.createElement('span');
+  dislikeIcon.textContent = '👎';
+  const dislikeCountSpan = document.createElement('span');
+  dislikeCountSpan.className = 'reaction-count dislike-count';
+  dislikeCountSpan.textContent = '0';
+
+  dislikeBtn.appendChild(dislikeIcon);
+  dislikeBtn.appendChild(dislikeCountSpan);
+
+  dislikeBtn.addEventListener('click', () => {
+    if (typeof onReaction === 'function') {
+      onReaction(item.title, 'dislike', likeBtn, dislikeBtn, likeCountSpan, dislikeCountSpan);
+    }
+  });
+
+  reactionsGroup.appendChild(likeBtn);
+  reactionsGroup.appendChild(dislikeBtn);
+  headerLeft.appendChild(reactionsGroup);
+
+  // 오른쪽: 작품 제목
   const title = document.createElement('h3');
   title.className = 'card-title';
   title.textContent = item.title;
 
-  header.appendChild(badgeWrapper);
+  header.appendChild(headerLeft);
   header.appendChild(title);
   card.appendChild(header);
 
-  // 2. 메타 정보 (연도 및 장르 - 데이터가 있을 때만 표시)
+  // 2. 메타 정보 (연도 및 장르)
   const metaParts = [];
   if (item.year) {
     metaParts.push(`${item.year}년`);
@@ -83,7 +141,7 @@ export function createRecommendationCard(item) {
   scoreLabel.textContent = '취향 매칭 점수';
 
   const scoreValue = document.createElement('span');
-  scoreValue.className = 'score-value';
+  scoreValue.className = `score-value score-value-${item.rank}`;
   const percentage = Math.max(0, Math.min(100, Math.round(item.matchPercentage || 0)));
   scoreValue.textContent = `${percentage}%`;
 
@@ -91,7 +149,6 @@ export function createRecommendationCard(item) {
   scoreHeader.appendChild(scoreValue);
   scoreWrapper.appendChild(scoreHeader);
 
-  // 접근성을 고려한 progressbar 요소
   const progressBg = document.createElement('div');
   progressBg.className = 'progress-bar-bg';
   progressBg.setAttribute('role', 'progressbar');
@@ -101,18 +158,70 @@ export function createRecommendationCard(item) {
   progressBg.setAttribute('aria-label', `${item.title} 취향 매칭 점수 ${percentage}%`);
 
   const progressFill = document.createElement('div');
-  progressFill.className = 'progress-bar-fill';
+  progressFill.className = `progress-bar-fill progress-fill-${item.rank}`;
   progressFill.style.width = `${percentage}%`;
   progressBg.appendChild(progressFill);
 
   scoreWrapper.appendChild(progressBg);
   card.appendChild(scoreWrapper);
 
-  // 4. 추천 분석 이유
+  // 4. 추천 이유 (2줄 요약)
+  const reasonBox = document.createElement('div');
+  reasonBox.className = 'detail-section reason-section';
+
+  const reasonTitle = document.createElement('h4');
+  reasonTitle.className = 'detail-section-title';
+  reasonTitle.textContent = '💡 추천 이유 요약';
+
   const reason = document.createElement('p');
   reason.className = 'card-reason';
   reason.textContent = item.reason;
-  card.appendChild(reason);
+
+  reasonBox.appendChild(reasonTitle);
+  reasonBox.appendChild(reason);
+  card.appendChild(reasonBox);
+
+  // 5. 실제 줄거리 요약 (3~5줄 분량)
+  if (item.synopsis) {
+    const synopsisBox = document.createElement('div');
+    synopsisBox.className = 'detail-section synopsis-section';
+
+    const synopsisTitle = document.createElement('h4');
+    synopsisTitle.className = 'detail-section-title';
+    synopsisTitle.textContent = '📖 핵심 줄거리';
+
+    const synopsisText = document.createElement('p');
+    synopsisText.className = 'card-synopsis';
+    synopsisText.textContent = item.synopsis;
+
+    synopsisBox.appendChild(synopsisTitle);
+    synopsisBox.appendChild(synopsisText);
+    card.appendChild(synopsisBox);
+  }
+
+  // 6. 주요 등장인물
+  if (Array.isArray(item.characters) && item.characters.length > 0) {
+    const charBox = document.createElement('div');
+    charBox.className = 'detail-section characters-section';
+
+    const charTitle = document.createElement('h4');
+    charTitle.className = 'detail-section-title';
+    charTitle.textContent = '👥 주요 등장인물';
+
+    const charList = document.createElement('ul');
+    charList.className = 'character-list';
+
+    item.characters.forEach(charInfo => {
+      const li = document.createElement('li');
+      li.className = 'character-item';
+      li.textContent = charInfo;
+      charList.appendChild(li);
+    });
+
+    charBox.appendChild(charTitle);
+    charBox.appendChild(charList);
+    card.appendChild(charBox);
+  }
 
   return card;
 }
@@ -148,4 +257,3 @@ export function createFeedbackCard(item) {
 
   return card;
 }
-

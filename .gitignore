@@ -1,6 +1,26 @@
+# ==============================================================================
+# 드라마 추천 서비스 .gitignore
+# 민감한 비밀키 파일(.env)과 무거운 의존성 폴더(node_modules)를 Git 추적에서 제외합니다.
+# ==============================================================================
+
+# 1. 의존성 패키지 폴더 제외
 node_modules/
+
+# 2. 민감한 API 비밀키 및 환경 설정 파일 제외
 .env
 .env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 예시 템플릿 파일(.env.example)은 제외 대상에서 해제
 !.env.example
+
+# 3. 배포 도구 및 시스템 임시 파일 제외
 .vercel/
 .DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
